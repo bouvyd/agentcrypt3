@@ -1,0 +1,38 @@
+[project]
+name = "agentcrypt3"
+version = "3.0.0"
+description = "Symmetric encryption using the ssh-agent"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { file = "LICENSE" }
+keywords = ["agentcrypt"]
+authors = [{ name = "Dirk Heuvels", email = "coding@heuvels.de" }]
+maintainers = [{ name = "Mathieu Walravens", email = "wama@odoo.com" }]
+classifiers = [
+    'Development Status :: 4 - Beta',
+    'Intended Audience :: Developers',
+    'License :: OSI Approved :: GNU General Public License v3 (GPLv3)',
+    'Natural Language :: English',
+    'Programming Language :: Python :: 3',
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3 :: Only",
+]
+dependencies = ['PyYAML', 'cryptography', 'paramiko>=3.4']
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[project.urls]
+"Homepage" = "https://github.com/mwath/agentcrypt3"
+"Bug Reports" = "https://github.com/mwath/agentcrypt3/issues"
+"Source" = "https://github.com/mwath/agentcrypt3"
+
+[tool.black]
+line-length = 120
+
+[tool.ruff]
+line-length = 120
+select = ["E", "F", "B", "G", "ISC", "I", "PL", "W605"]
