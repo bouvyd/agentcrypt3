@@ -11,12 +11,13 @@ class AgentCryptException(Exception):
 
     .. _`raise from`: https://docs.python.org/3/reference/simple_stmts.html#raise
     """
+
     def __init__(self, message):
         super(AgentCryptException, self).__init__(message)
 
 
 class NoContainerException(AgentCryptException):
-    """Sub class of `AgentCryptException` that is raised, when an existing container cannot be loaded.
-    """
+    """Sub class of `AgentCryptException` that is raised, when an existing container cannot be loaded."""
+
     def __init__(self, message):
         super(NoContainerException, self).__init__(message)

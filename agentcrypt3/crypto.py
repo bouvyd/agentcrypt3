@@ -1,46 +1,43 @@
 # -*- coding: utf-8 -*-
 
 from __future__ import absolute_import
-from future.utils import raise_from
 
 import base64
+import os
+import struct
+from hashlib import sha256
+
+import paramiko
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import ciphers, hashes, padding
 from cryptography.hazmat.primitives.ciphers import algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
-from hashlib import sha256
-import os
-import paramiko
-from paramiko.py3compat import b
-from paramiko import SSHException
-import struct
+from paramiko import Message, SSHException
 
 from .exceptions import AgentCryptException
-from .py2compat import try_bytes
 
 
 class AgentKey(paramiko.AgentKey):
-    """ Specialization of `paramiko.agent.AgentKey`_ with a few additions for our purposes.
+    """Specialization of `paramiko.agent.AgentKey`_ with a few additions for our purposes.
 
-    .. _`paramiko.agent.AgentKey`: http://docs.paramiko.org/en/2.4/api/agent.html#paramiko.agent.AgentKey
+    .. _`paramiko.agent.AgentKey`: http://docs.paramiko.org/en/3.4/api/agent.html#paramiko.agent.AgentKey
     """
 
-    _SUPPORTED_KEY_TYPES = ['ssh-rsa', 'ssh-ed25519']
+    _SUPPORTED_KEY_TYPES = ["ssh-rsa", "ssh-ed25519"]
 
-    def __init__(self, agent, agent_key):
-        super(AgentKey, self).__init__(agent, agent_key.asbytes())
+    def __init__(self, agent: paramiko.Agent, agent_key: paramiko.AgentKey):
+        super().__init__(agent, agent_key.asbytes())
 
-    def get_sha256_fingerprint(self):
+    def get_sha256_fingerprint(self) -> bytes:
         """
         SHA256 fingerprint extension from `pull request 1103`_.
 
         .. _`pull request 1103`: https://github.com/paramiko/paramiko/pull/1103/commits/8e0b7ef85fc72d844dee80688060001a3fba8ad0
         """
-        return base64.b64encode(b(sha256(self.asbytes()).digest()))[:-1]
+        return base64.b64encode(sha256(self.asbytes()).digest())[:-1]
 
-    def get_ssh_signature_blob(self, data):
-        """ Signs ``data`` and returns the signature as `bytes`.
+    def get_ssh_signature_blob(self, data: bytes) -> bytes:
+        """Signs ``data`` and returns the signature as `bytes`.
 
         :param data: The `bytes` object to be signed.
         :return: The signature part of the resulting `SSH_AGENT_SIGN_RESPONSE` message as described in the RFCs
@@ -49,61 +46,67 @@ class AgentKey(paramiko.AgentKey):
         .. _`SSH Agent Protocol draft`: https://tools.ietf.org/id/draft-miller-ssh-agent-00.html#rfc.section.4.5.
         """
         try:
-            sig_msg = super(AgentKey, self).sign_ssh_data(data)
+            sig_msg = Message(super().sign_ssh_data(data))  # type: ignore
         except SSHException as sshe:
-            raise_from(AgentCryptException("Failed access key '{}'. You probably added it with the confirmation option "
-                                           "(ssh-add -c ..) and did not confirm. (Did you install 'ssh-askpass'?)"
-                                           .format(self.get_sha256_fingerprint().decode())), sshe)
+            raise AgentCryptException(
+                "Failed access key '{}'. You probably added it with the confirmation option "
+                "(ssh-add -c ..) and did not confirm. (Did you install 'ssh-askpass'?)".format(
+                    self.get_sha256_fingerprint().decode()
+                )
+            ) from sshe
 
         msg_parts = []
         try:
-            for loop in range(0, 2):
-                plen = struct.unpack('>I', sig_msg[:4])[0]
-                msg_parts.append(sig_msg[4:(plen+4)])
-                sig_msg = sig_msg[(plen+4):]
+            for _ in range(0, 2):
+                msg_parts.append(sig_msg.get_binary())
         except struct.error as se:
-            raise_from(AgentCryptException("Failed to unpack SSH_AGENT_SIGN_RESPONSE from agent."), se)
+            raise AgentCryptException("Failed to unpack SSH_AGENT_SIGN_RESPONSE from agent.") from se
 
         # Some sanity checks on the signature message.
         if len(msg_parts) != 2:
-            raise AgentCryptException("Got unexpected SSH_AGENT_SIGN_RESPONSE message from agent "
-                                      "({:d} message parts instead of 2).".format(len(msg_parts)))
+            raise AgentCryptException(
+                "Got unexpected SSH_AGENT_SIGN_RESPONSE message from agent "
+                "({:d} message parts instead of 2).".format(len(msg_parts))
+            )
 
-        sig_format = (msg_parts[0]).decode(errors='replace')
+        sig_format = msg_parts[0].decode(errors="replace")
         sig_blob = msg_parts[1]
 
         if sig_format not in AgentKey._SUPPORTED_KEY_TYPES:
-            raise AgentCryptException("Unsupported '{}' key signature in SSH_AGENT_SIGN_RESPONSE response."
-                                      " Only the following key types are supported: '{}'"
-                                      .format(sig_format, "', '".join(AgentKey._SUPPORTED_KEY_TYPES)))
+            raise AgentCryptException(
+                "Unsupported '{}' key signature in SSH_AGENT_SIGN_RESPONSE response."
+                " Only the following key types are supported: '{}'".format(
+                    sig_format, "', '".join(AgentKey._SUPPORTED_KEY_TYPES)
+                )
+            )
 
         return sig_blob
 
 
 class SSHAgent(paramiko.Agent):
-    """ Specialization of `paramiko.agent.Agent`_ which uses :class:`crypto.AgentKey` objects internally.
+    """Specialization of `paramiko.agent.Agent`_ which uses :class:`crypto.AgentKey` objects internally.
 
-    .. _`paramiko.agent.Agent`: http://docs.paramiko.org/en/2.4/api/agent.html#paramiko.agent.Agent
+    .. _`paramiko.agent.Agent`: http://docs.paramiko.org/en/3.4/api/agent.html#paramiko.agent.Agent
     """
 
     __instance = None
 
     def __init__(self):
         try:
-            super(SSHAgent, self).__init__()
-            self.ac_keys = list(map(lambda key: AgentKey(self, key), super(SSHAgent, self).get_keys()))
+            super().__init__()
+            self.ac_keys = [AgentKey(self, key) for key in super().get_keys()]
 
             if not self.ac_keys:
                 raise AgentCryptException("No keys found in SSH agent.")
 
         except SSHException as sshe:
-            raise_from(AgentCryptException("Failed to connect to SSH agent."), sshe)
+            raise AgentCryptException("Failed to connect to SSH agent.") from sshe
 
     def __del__(self):
-        super(SSHAgent, self).close()  # No other reasonable way than __del__(), to ensure close() is called.
+        super().close()  # No other reasonable way than __del__(), to ensure close() is called.
 
     @classmethod
-    def get_key(cls, key_fp=None):
+    def get_key(cls, key_fp: bytes | None = None):
         """
         Searches for the specified key in the agent. Creates a new instance of :class:`SSHAgent`, if necessary
         (singleton logic).
@@ -116,13 +119,13 @@ class SSHAgent(paramiko.Agent):
         self = cls.__instance
 
         for key in self.ac_keys:
-            if not key_fp or key.get_sha256_fingerprint() == try_bytes(key_fp):
+            if not key_fp or key.get_sha256_fingerprint() == key_fp:
                 return key
 
         return None
 
 
-class Cipher(object):
+class Cipher:
     """
     Provides symmetric encryption with the help of the `pyca/cryptography`_ library.
 
@@ -138,9 +141,6 @@ class Cipher(object):
     AES_128_CBC = "AES_128_CBC"
     """ Cipher name. """
     DES_EDE3_CBC = "DES_EDE3_CBC"
-    """ Cipher name. """
-    Blowfish_CBC = "Blowfish_CBC"
-    """ Cipher name. """
 
     def __init__(self, cipher_name=None):
         """Creates a new instance that uses the selected cipher.
@@ -152,22 +152,17 @@ class Cipher(object):
         cipher_name = cipher_name if cipher_name else Cipher.AES_256_CBC
         if cipher_name == Cipher.AES_256_CBC:
             self.algorithm = algorithms.AES
-            self.block_size = algorithms.AES.block_size
+            self.block_size: int = algorithms.AES.block_size  # type: ignore
             self.key_size = 256
         # Ciphers for converting legacy containers only. New ones should always be created as AES_256_CBC.
         elif cipher_name == Cipher.AES_128_CBC:
             self.algorithm = algorithms.AES
-            self.block_size = algorithms.AES.block_size
+            self.block_size: int = algorithms.AES.block_size  # type: ignore
             self.key_size = 128
         elif cipher_name == Cipher.DES_EDE3_CBC:
             self.algorithm = algorithms.TripleDES
-            self.block_size = algorithms.TripleDES.block_size
+            self.block_size: int = algorithms.TripleDES.block_size  # type: ignore
             self.key_size = 192
-        elif cipher_name == Cipher.Blowfish_CBC:
-            self.algorithm = algorithms.Blowfish
-            self.block_size = algorithms.Blowfish.block_size
-            # Up to 448, but 128 were chosen one day, because it's considered strong and makes it testable with OpenSSL.
-            self.key_size = 128
         else:
             raise AgentCryptException("Unsupported cipher '{}'.".format(cipher_name))
         self.cipher_name = cipher_name
@@ -195,12 +190,12 @@ class Cipher(object):
 
         .. _`PBKDF2HMAC`: https://cryptography.io/en/latest/hazmat/primitives/key-derivation-functions/#cryptography.hazmat.primitives.kdf.pbkdf2.PBKDF2HMAC
         """
-        #return Scrypt(salt=salt, length=key_size // 8, n=2**14, r=8, p=1, backend=default_backend())
+        # return Scrypt(salt=salt, length=key_size // 8, n=2**14, r=8, p=1, backend=default_backend())
         return PBKDF2HMAC(
             algorithm=hashes.SHA256(), salt=salt, length=key_size // 8, iterations=100000, backend=default_backend()
         )
 
-    def encrypt(self, data, password, salt):
+    def encrypt(self, data: bytes, password: bytes, salt: bytes):
         """Encrypt data.
 
         :param data: Cleartext data to encrypt.
@@ -208,8 +203,6 @@ class Cipher(object):
         :param salt: The salt (will be fed to the KDF in use).
         :return: `bytes` object with encrypted data.
         """
-        data = try_bytes(data)
-
         kdf = self.get_kdf(salt, self.key_size)
         key = kdf.derive(password)
 
@@ -220,7 +213,7 @@ class Cipher(object):
         data = padder.update(data) + padder.finalize()
         return iv + encryptor.update(data) + encryptor.finalize()
 
-    def decrypt(self, data_enc, password, salt):
+    def decrypt(self, data_enc: bytes, password: bytes, salt: bytes) -> bytes:
         """Decrypt data.
 
         :param data: `bytes` object with encrypted data.
@@ -243,4 +236,4 @@ class Cipher(object):
             return unpadder.update(data) + unpadder.finalize()
         except (ValueError, TypeError):
             # No padding oracle scenario in our usecase, but probably a good habit not to raise with root cause.
-            raise_from(AgentCryptException("Decryption failed."), AgentCryptException("*redacted*"))
+            raise AgentCryptException("Decryption failed.") from AgentCryptException("*redacted*")

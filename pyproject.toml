@@ -23,7 +23,7 @@ classifiers = [
 dependencies = ['PyYAML', 'cryptography', 'paramiko>=3.4']
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff"]
+dev = ["pytest", "ruff", "typing_extensions"]
 
 [project.urls]
 "Homepage" = "https://github.com/mwath/agentcrypt3"
@@ -35,4 +35,4 @@ line-length = 120
 
 [tool.ruff]
 line-length = 120
-select = ["E", "F", "B", "G", "ISC", "I", "PL", "W605"]
+select = ["E", "F", "B", "G", "ISC", "I", "W"]

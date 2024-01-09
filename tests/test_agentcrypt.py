@@ -1,29 +1,28 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-from __future__ import print_function
-
 import base64
-from binascii import hexlify
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import ciphers
-from cryptography.hazmat.primitives.ciphers import algorithms, modes
 import glob
-from hashlib import sha256
 import os
-import paramiko
-import paramiko.ed25519key
-from paramiko.py3compat import b
 import random
 import re
 import string
 import subprocess
-import unittest
 import sys
+import unittest
+from binascii import hexlify
+from hashlib import sha256
+from typing import IO
 
-from agentcrypt.exceptions import AgentCryptException
-from agentcrypt.io import Container
-from agentcrypt.crypto import Cipher
+import paramiko
+import paramiko.ed25519key
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import ciphers
+from cryptography.hazmat.primitives.ciphers import algorithms, modes
+
+from agentcrypt3.crypto import Cipher
+from agentcrypt3.exceptions import AgentCryptException
+from agentcrypt3.io import Container
 
 
 # Generate text without requiring fortunes or py-lorem.
@@ -32,15 +31,14 @@ def _lorem(len=16):
 
 
 def _sha256_fingerprint(key_obj):
-    return base64.b64encode(b(sha256(key_obj.asbytes()).digest()))[:-1]
+    return base64.b64encode(sha256(key_obj.asbytes()).digest())[:-1]
 
 
 class SymmetricCipherTests(unittest.TestCase):
     OPENSSL_CIPHERS = {
-        Cipher.AES_256_CBC: {'name': '-aes-256-cbc', 'key_size': 256, 'block_size': 128},
-        Cipher.AES_128_CBC: {'name': '-aes-128-cbc', 'key_size': 128, 'block_size': 128},
-        Cipher.DES_EDE3_CBC: {'name': '-des-ede3-cbc', 'key_size': 192, 'block_size': 64},
-        Cipher.Blowfish_CBC: {'name': '-bf-cbc', 'key_size': 128, 'block_size': 64}
+        Cipher.AES_256_CBC: {"name": "-aes-256-cbc", "key_size": 256, "block_size": 128},
+        Cipher.AES_128_CBC: {"name": "-aes-128-cbc", "key_size": 128, "block_size": 128},
+        Cipher.DES_EDE3_CBC: {"name": "-des-ede3-cbc", "key_size": 192, "block_size": 64},
     }
 
     @staticmethod
@@ -60,9 +58,9 @@ class SymmetricCipherTests(unittest.TestCase):
             salt = os.urandom(Cipher.SALT_LEN)
             passwd = _lorem()
 
-            key = Cipher.get_kdf(salt, ossl_cipher_equiv['key_size']).derive(passwd)
-            iv = os.urandom(ossl_cipher_equiv['block_size'] // 8)
-            data_enc_ossl = self._call_openssl(data_orig, ossl_cipher_equiv['name'], key, iv)
+            key = Cipher.get_kdf(salt, ossl_cipher_equiv["key_size"]).derive(passwd)
+            iv = os.urandom(ossl_cipher_equiv["block_size"] // 8)
+            data_enc_ossl = self._call_openssl(data_orig, ossl_cipher_equiv["name"], key, iv)
 
             data_decrypt = Cipher(our_cipher_name).decrypt(data_enc_ossl, passwd, salt)
             self.assertEqual(data_orig, data_decrypt)
@@ -71,9 +69,9 @@ class SymmetricCipherTests(unittest.TestCase):
         """
         Check the reactions to wrong passwords and paddings.
         """
-        data_orig = b'd' * 32  # With AES+PKCS7 this gets us 2 encrypted blocks + 1 padding-only block full of 0x0f.
-        passwd = b'hush hush'
-        salt = b'chocolate salty balls'
+        data_orig = b"d" * 32  # With AES+PKCS7 this gets us 2 encrypted blocks + 1 padding-only block full of 0x0f.
+        passwd = b"hush hush"
+        salt = b"chocolate salty balls"
 
         cipher = Cipher(Cipher.AES_256_CBC)
         data_enc = cipher.encrypt(data_orig, passwd, salt)
@@ -84,7 +82,7 @@ class SymmetricCipherTests(unittest.TestCase):
 
         # Now test, if decryption with a wrong password raises the expected exception.
         with self.assertRaises(AgentCryptException) as assert_ctx:
-            cipher.decrypt(data_enc, passwd + b'whoops', salt)
+            cipher.decrypt(data_enc, passwd + b"whoops", salt)
         # Decryption should not provide a root cause.
         self.assertEqual(str(assert_ctx.exception.__cause__), "*redacted*")
 
@@ -112,10 +110,10 @@ class SymmetricCipherTests(unittest.TestCase):
 
 class AgentEncryptionTests(unittest.TestCase):
     SSH_TEST_KEYS = {
-        'rsa_1024': {'loader': paramiko.RSAKey, 'type': "rsa", 'bytes': "1024"},
-        'rsa_2048': {'loader': paramiko.RSAKey, 'type': "rsa", 'bytes': "2048"},
-        'rsa_4096': {'loader': paramiko.RSAKey, 'type': "rsa", 'bytes': "4096"},
-        'ed25519': {'loader': paramiko.ed25519key.Ed25519Key, 'type': 'ed25519', 'bytes': None},
+        "rsa_1024": {"loader": paramiko.RSAKey, "type": "rsa", "bytes": "1024"},
+        "rsa_2048": {"loader": paramiko.RSAKey, "type": "rsa", "bytes": "2048"},
+        "rsa_4096": {"loader": paramiko.RSAKey, "type": "rsa", "bytes": "4096"},
+        "ed25519": {"loader": paramiko.ed25519key.Ed25519Key, "type": "ed25519", "bytes": None},
     }
 
     @classmethod
@@ -140,30 +138,35 @@ class AgentEncryptionTests(unittest.TestCase):
 
             key_path = os.path.join(key_dir, key_name)
             if not os.path.isfile(key_path):
-                key_type = AgentEncryptionTests.SSH_TEST_KEYS[key_name]['type']
-                key_bytes = AgentEncryptionTests.SSH_TEST_KEYS[key_name]['bytes']
+                key_type = AgentEncryptionTests.SSH_TEST_KEYS[key_name]["type"]
+                key_bytes = AgentEncryptionTests.SSH_TEST_KEYS[key_name]["bytes"]
                 subprocess_params = [
                     "ssh-keygen",
-                     "-t", key_type,
-                     "-m", "RFC4716",
-                     "-N", "",
-                     "-C", "{}-{}".format(key_type, key_bytes),
-                     "-f", key_path
+                    "-t",
+                    key_type,
+                    "-m",
+                    "RFC4716",
+                    "-N",
+                    "",
+                    "-C",
+                    f"{key_type}-{key_bytes}",
+                    "-f",
+                    key_path,
                 ]
                 if key_bytes:
-                    subprocess_params.append("-b", key_bytes)
+                    subprocess_params.extend(["-b", key_bytes])
                 subprocess.call(subprocess_params)
 
         agent = paramiko.Agent()
         keys = agent.get_keys()
 
-        if not keys and agent._conn is None:
+        if not keys and agent._conn is None:  # type: ignore
             print("No ssh-agent found. Trying to start it at runtime.", file=sys.stderr)
             # Kind of best effort what follows.
 
             p_hndl = subprocess.Popen(["ssh-agent", "-c"], stdout=subprocess.PIPE)
-            p_out = p_hndl.stdout
-            re_pat = re.compile('^setenv ([A-Z_]+) (.+);')
+            p_out: IO[bytes] = p_hndl.stdout  # type: ignore
+            re_pat = re.compile("^setenv ([A-Z_]+) (.+);")
             while True:
                 line = p_out.readline().decode()
                 if not line:
@@ -187,8 +190,9 @@ class AgentEncryptionTests(unittest.TestCase):
             key_path = os.path.join(key_dir, filename)
             cntr_path = os.path.join(tmp_dir, "container_" + filename)
 
+            file_key_fp = None
             for agent_key in agent.get_keys():
-                file_key = AgentEncryptionTests.SSH_TEST_KEYS[filename]['loader'].from_private_key_file(key_path)
+                file_key = AgentEncryptionTests.SSH_TEST_KEYS[filename]["loader"].from_private_key_file(key_path)
                 file_key_fp = _sha256_fingerprint(file_key)
 
                 if file_key_fp == _sha256_fingerprint(agent_key):
@@ -240,15 +244,18 @@ class AgentEncryptionTests(unittest.TestCase):
             data_orig = _lorem()
             data_orig_by_cntr_path[cntr_path] = data_orig
 
-            with Container.create(cntr_path, ssh_key_fp=self.fp_by_cntr_path[cntr_path], ) as cntr:
-                cntr.write(b'b1')
-                cntr.write('s2')
-                cntr.writelines([b'b3', b'b3'])
-                cntr.writelines(['b4', 'b4'])
+            with Container.create(
+                cntr_path,
+                ssh_key_fp=self.fp_by_cntr_path[cntr_path],
+            ) as cntr:
+                cntr.write(b"b1")
+                cntr.write(b"s2")
+                cntr.writelines([b"b3", b"b3"])
+                cntr.writelines([b"b4", b"b4"])
 
         for cntr_path in self.fp_by_cntr_path:
             with Container.load(cntr_path) as cntr:
-                self.assertEqual(cntr.getvalue(), b'b1s2b3b3b4b4')
+                self.assertEqual(cntr.getvalue(), b"b1s2b3b3b4b4")
 
     def test_03_container_file_interface_cleanup_empty(self):
         for cntr_path in self.fp_by_cntr_path:
@@ -267,15 +274,18 @@ class AgentEncryptionTests(unittest.TestCase):
     def test_05_container_file_interface_legacy_ciphers(self):
         data_orig_by_cntr_path = {}
 
-        for cipher_name in [Cipher.AES_128_CBC, Cipher.DES_EDE3_CBC, Cipher.Blowfish_CBC]:
-
+        for cipher_name in [Cipher.AES_128_CBC, Cipher.DES_EDE3_CBC]:
             for cntr_path in self.fp_by_cntr_path:
                 data_orig = _lorem()
                 cntr_path_variant = "{}.{}".format(cntr_path, cipher_name)
                 data_orig_by_cntr_path[cntr_path_variant] = data_orig
 
-                with Container.create(cntr_path_variant, ssh_key_fp=self.fp_by_cntr_path[cntr_path],
-                                      data=data_orig, cipher_name=cipher_name) as cntr:
+                with Container.create(
+                    cntr_path_variant,
+                    ssh_key_fp=self.fp_by_cntr_path[cntr_path],
+                    data=data_orig,
+                    cipher_name=cipher_name,
+                ) as cntr:
                     self.assertIsInstance(cntr, Container)
 
             for cntr_path in self.fp_by_cntr_path:
@@ -284,17 +294,20 @@ class AgentEncryptionTests(unittest.TestCase):
                 self.assertEqual(data_orig_by_cntr_path[cntr_path_variant], cntr.getvalue())
 
     def test_06_container_stream_interface(self):
-        for interpreter in ["python2", "python3"]:
-            cntr_path = list(self.fp_by_cntr_path)[random.choice(range(0, len(self.fp_by_cntr_path)))]
-            data_orig = _lorem()
-
-            p_hndl = subprocess.Popen([interpreter, "-magentcrypt.io", "enc", self.fp_by_cntr_path[cntr_path]],
-                                      stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.STDOUT)
-            data_encrypted = (p_hndl.communicate(data_orig))[0]
-
-            p_hndl = subprocess.Popen([interpreter, "-magentcrypt.io", "dec", self.fp_by_cntr_path[cntr_path]],
-                                      stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.STDOUT)
-            data_decrypted = (p_hndl.communicate(data_encrypted))[0].rstrip()
+        data_orig = _lorem()
+        for cntr_path in self.fp_by_cntr_path:
+            data_encrypted = subprocess.run(
+                [sys.executable, "-m", "agentcrypt3.io", "enc", self.fp_by_cntr_path[cntr_path].decode()],
+                input=data_orig,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
+            data_decrypted = subprocess.run(
+                [sys.executable, "-m", "agentcrypt3.io", "dec", self.fp_by_cntr_path[cntr_path].decode()],
+                input=data_encrypted,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
 
             self.assertEqual(data_decrypted, data_orig)
 
@@ -338,8 +351,9 @@ class AgentEncryptionTests(unittest.TestCase):
         cntr_path_variant = "{}.{}".format(cntr_path, "rekey")
 
         first_cipher = Cipher.DES_EDE3_CBC
-        cntr = Container.create(cntr_path_variant, ssh_key_fp=self.fp_by_cntr_path[cntr_path],
-                                cipher_name=first_cipher, data=data_orig)
+        cntr = Container.create(
+            cntr_path_variant, ssh_key_fp=self.fp_by_cntr_path[cntr_path], cipher_name=first_cipher, data=data_orig
+        )
         cntr.close()
 
         second_cipher = Cipher.AES_128_CBC
@@ -352,5 +366,5 @@ class AgentEncryptionTests(unittest.TestCase):
             self.assertEqual(second_cipher, cntr.cipher.cipher_name)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
