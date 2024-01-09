@@ -1,8 +1,6 @@
 [project]
 name = "agentcrypt3"
-version = "3.0.0"
 description = "Symmetric encryption using the ssh-agent"
-readme = "README.md"
 requires-python = ">=3.8"
 license = { file = "LICENSE" }
 keywords = ["agentcrypt"]
@@ -21,6 +19,7 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
 ]
 dependencies = ['PyYAML', 'cryptography', 'paramiko>=3.4']
+dynamic = ["version", "readme"]
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff", "typing_extensions"]
@@ -29,6 +28,13 @@ dev = ["pytest", "ruff", "typing_extensions"]
 "Homepage" = "https://github.com/mwath/agentcrypt3"
 "Bug Reports" = "https://github.com/mwath/agentcrypt3/issues"
 "Source" = "https://github.com/mwath/agentcrypt3"
+
+[tool.setuptools]
+packages = ["agentcrypt3"]
+
+[tool.setuptools.dynamic]
+version = { attr = "agentcrypt3.__version__" }
+readme = { file = ["README.rst"] }
 
 [tool.black]
 line-length = 120
